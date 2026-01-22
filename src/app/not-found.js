@@ -13,24 +13,31 @@ function safeGet(h, key) {
   }
 }
 
-function normalizeHost(rawHost) {
-  if (!rawHost) return "unknown-domain";
-  // remove port (example: localhost:3000)
-  const noPort = rawHost.split(":")[0].trim().toLowerCase();
-  // remove leading www.
-  return noPort.replace(/^www\./, "");
+function firstHostValue(raw) {
+  // sometimes: "www.utab.bd, utab.bd" or "www.utab.bd,proxy"
+  if (!raw) return "";
+  return raw.split(",")[0].trim();
+}
+
+function removePort(host) {
+  if (!host) return "";
+  return host.split(":")[0].trim();
+}
+
+function normalizeHostForRoot(rawHost) {
+  // For root domain display: remove port + remove www.
+  const h = removePort(firstHostValue(rawHost)).toLowerCase();
+  return h.replace(/^www\./, "");
 }
 
 /**
  * Root domain extraction:
  * - default: last 2 labels => example.com, utab.bd
- * - if ends with common multi-part suffix (com.bd, net.bd, org.bd, gov.bd, edu.bd, ac.bd) => last 3 labels
+ * - if ends with multi-part suffix (com.bd, net.bd, org.bd, gov.bd, edu.bd, ac.bd) => last 3 labels
  */
 function getRootDomain(host) {
-  const h = normalizeHost(host);
-  const parts = h.split(".").filter(Boolean);
-
-  if (parts.length <= 2) return h;
+  const parts = (host || "").split(".").filter(Boolean);
+  if (parts.length <= 2) return host || "unknown-domain";
 
   const multiPartSuffixes = new Set([
     "com.bd",
@@ -44,12 +51,7 @@ function getRootDomain(host) {
   const last2 = parts.slice(-2).join(".");
   const last3 = parts.slice(-3).join(".");
 
-  // if host ends with multi-part suffix -> keep 3 labels (example: something.com.bd)
-  if (multiPartSuffixes.has(last2) && parts.length >= 3) {
-    return last3;
-  }
-
-  // normal case -> keep last 2 labels
+  if (multiPartSuffixes.has(last2) && parts.length >= 3) return last3;
   return last2;
 }
 
@@ -61,14 +63,18 @@ function getHostAndOrigin(h) {
 
   const proto = safeGet(h, "x-forwarded-proto") || "https";
 
-  const cleanHost = normalizeHost(rawHost);
-  const rootDomain = getRootDomain(cleanHost);
+  // ✅ actual visited host (keep www/subdomain) for Request Origin
+  const visitedHost = removePort(firstHostValue(rawHost)) || "unknown-domain";
+  const requestOrigin = `${proto}://${visitedHost}`;
+
+  // ✅ root domain (remove www + subdomain) for header title
+  const cleanedForRoot = normalizeHostForRoot(rawHost);
+  const rootDomain = getRootDomain(cleanedForRoot);
 
   return {
-    rawHost,
-    cleanHost,   // www removed, port removed
-    rootDomain,  // ✅ what you want to show (utab.bd)
-    origin: `${proto}://${cleanHost}`, // request origin (without www/port)
+    rootDomain,
+    requestOrigin,
+    visitedHost,
   };
 }
 
@@ -79,7 +85,7 @@ function getDomainInitial(domain) {
 
 export default async function NotFound() {
   const h = await headers();
-  const { rootDomain, origin } = getHostAndOrigin(h);
+  const { rootDomain, requestOrigin } = getHostAndOrigin(h);
   const initial = getDomainInitial(rootDomain);
 
   return (
@@ -117,16 +123,13 @@ export default async function NotFound() {
                   backgroundColor: "rgba(255,255,255,0.04)",
                 }}
               >
-                <span
-                  className="text-sm font-extrabold"
-                  style={{ color: "var(--primary)" }}
-                >
+                <span className="text-sm font-extrabold" style={{ color: "var(--primary)" }}>
                   {initial}
                 </span>
               </div>
 
               <div className="leading-tight min-w-0">
-                {/* ✅ Show root domain (no www, no subdomain) */}
+                {/* ✅ show root domain (utab.bd) */}
                 <div className="text-sm font-semibold break-all">{rootDomain}</div>
                 <div className="text-xs text-slate-500 dark:text-white/60">
                   Shohayok Team
@@ -143,10 +146,7 @@ export default async function NotFound() {
                 borderColor: "rgba(73,3,254,0.28)",
               }}
             >
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: "var(--primary)" }}
-              />
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--primary)" }} />
               Maintenance
             </span>
           </div>
@@ -161,13 +161,11 @@ export default async function NotFound() {
               This domain is being configured. If you are the owner, please contact support.
             </p>
 
-            {/* Request Origin */}
+            {/* ✅ Request Origin = actual visited host */}
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-white/10 dark:bg-white/5">
-              <div className="text-xs text-slate-500 dark:text-white/60">
-                Request Origin
-              </div>
+              <div className="text-xs text-slate-500 dark:text-white/60">Request Origin</div>
               <div className="mt-1 font-mono text-sm break-all text-slate-900 dark:text-white">
-                {origin}
+                {requestOrigin}
               </div>
             </div>
 
