@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 
-export const PRIMARY = "rgb(73,3,254)"; // ✅ your primary color
+export const PRIMARY = "rgb(73,3,254)";
 
 function safeGet(h, key) {
   try {
@@ -13,39 +13,79 @@ function safeGet(h, key) {
   }
 }
 
+function normalizeHost(rawHost) {
+  if (!rawHost) return "unknown-domain";
+  // remove port (example: localhost:3000)
+  const noPort = rawHost.split(":")[0].trim().toLowerCase();
+  // remove leading www.
+  return noPort.replace(/^www\./, "");
+}
+
+/**
+ * Root domain extraction:
+ * - default: last 2 labels => example.com, utab.bd
+ * - if ends with common multi-part suffix (com.bd, net.bd, org.bd, gov.bd, edu.bd, ac.bd) => last 3 labels
+ */
+function getRootDomain(host) {
+  const h = normalizeHost(host);
+  const parts = h.split(".").filter(Boolean);
+
+  if (parts.length <= 2) return h;
+
+  const multiPartSuffixes = new Set([
+    "com.bd",
+    "net.bd",
+    "org.bd",
+    "gov.bd",
+    "edu.bd",
+    "ac.bd",
+  ]);
+
+  const last2 = parts.slice(-2).join(".");
+  const last3 = parts.slice(-3).join(".");
+
+  // if host ends with multi-part suffix -> keep 3 labels (example: something.com.bd)
+  if (multiPartSuffixes.has(last2) && parts.length >= 3) {
+    return last3;
+  }
+
+  // normal case -> keep last 2 labels
+  return last2;
+}
+
 function getHostAndOrigin(h) {
-  const host =
+  const rawHost =
     safeGet(h, "x-forwarded-host") ||
     safeGet(h, "host") ||
     "unknown-domain";
 
   const proto = safeGet(h, "x-forwarded-proto") || "https";
 
+  const cleanHost = normalizeHost(rawHost);
+  const rootDomain = getRootDomain(cleanHost);
+
   return {
-    host,
-    origin: `${proto}://${host}`,
+    rawHost,
+    cleanHost,   // www removed, port removed
+    rootDomain,  // ✅ what you want to show (utab.bd)
+    origin: `${proto}://${cleanHost}`, // request origin (without www/port)
   };
 }
 
-function getDomainInitial(host) {
-  // "abc.shastho.bd" -> "A"
-  // "shohayok.com" -> "S"
-  const first = (host || "S").trim().charAt(0) || "S";
+function getDomainInitial(domain) {
+  const first = (domain || "S").trim().charAt(0) || "S";
   return first.toUpperCase();
 }
 
 export default async function NotFound() {
   const h = await headers();
-  const { host, origin } = getHostAndOrigin(h);
-  const initial = getDomainInitial(host);
+  const { rootDomain, origin } = getHostAndOrigin(h);
+  const initial = getDomainInitial(rootDomain);
 
   return (
     <div
       className="min-h-screen px-4 py-10 flex items-center justify-center bg-white text-slate-900 dark:bg-[#070A12] dark:text-white"
-      style={{
-        // used by a few UI parts
-        "--primary": PRIMARY,
-      }}
+      style={{ "--primary": PRIMARY }}
     >
       {/* Background glow */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -86,8 +126,8 @@ export default async function NotFound() {
               </div>
 
               <div className="leading-tight min-w-0">
-                {/* ✅ Dynamic domain */}
-                <div className="text-sm font-semibold break-all">{host}</div>
+                {/* ✅ Show root domain (no www, no subdomain) */}
+                <div className="text-sm font-semibold break-all">{rootDomain}</div>
                 <div className="text-xs text-slate-500 dark:text-white/60">
                   Shohayok Team
                 </div>
